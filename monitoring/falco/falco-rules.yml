@@ -1,0 +1,68 @@
+# ── Reglas personalizadas Falco para NetWatch ────────────────────────────────
+# Detectan comportamiento anómalo en los contenedores del proyecto.
+
+- rule: NetWatch captura no autorizada
+  desc: Proceso de captura de red en contenedor que no es worker-capture
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (tcpdump, tshark, scapy, dumpcap, nmap)
+    and not container.name = "netwatch-worker-capture"
+  output: >
+    Captura de red no autorizada detectada
+    (container=%container.name proc=%proc.name cmdline=%proc.cmdline
+     user=%user.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [netwatch, capture, security]
+
+- rule: NetWatch escalada de privilegios
+  desc: Uso de su o sudo en contenedor del proyecto NetWatch
+  condition: >
+    container
+    and container.name startswith "netwatch"
+    and proc.name in (su, sudo, newgrp)
+  output: >
+    Escalada de privilegios en contenedor NetWatch
+    (container=%container.name proc=%proc.name user=%user.name)
+  priority: WARNING
+  tags: [netwatch, privilege-escalation]
+
+- rule: NetWatch escritura en sistema de archivos del sistema
+  desc: Escritura en /etc, /bin o /usr dentro de un contenedor NetWatch
+  condition: >
+    container
+    and container.name startswith "netwatch"
+    and open_write
+    and (fd.name startswith /etc or fd.name startswith /bin or fd.name startswith /usr)
+  output: >
+    Escritura en directorio del sistema en contenedor NetWatch
+    (container=%container.name file=%fd.name proc=%proc.name user=%user.name)
+  priority: WARNING
+  tags: [netwatch, filesystem]
+
+- rule: NetWatch shell inesperado
+  desc: Shell interactivo abierto en contenedor de producción NetWatch
+  condition: >
+    container
+    and container.name startswith "netwatch"
+    and spawned_process
+    and proc.name in (bash, sh, ash, zsh)
+    and proc.tty != 0
+  output: >
+    Shell interactivo detectado en contenedor NetWatch
+    (container=%container.name shell=%proc.name user=%user.name)
+  priority: ERROR
+  tags: [netwatch, shell, security]
+
+- rule: NetWatch conexión saliente no esperada
+  desc: Conexión de red saliente desde worker-analysis o worker-alerts (solo deben hablar con RabbitMQ/PostgreSQL)
+  condition: >
+    outbound
+    and container
+    and container.name in (netwatch-worker-analysis, netwatch-worker-alerts)
+    and not fd.sport in (5432, 5672, 8081, 8083, 9090)
+  output: >
+    Conexión saliente inesperada desde worker
+    (container=%container.name dport=%fd.dport dip=%fd.dip)
+  priority: WARNING
+  tags: [netwatch, network, anomaly]

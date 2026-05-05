@@ -1,0 +1,11 @@
+# Variables de entorno — nunca subir al repositorio
+.env
+
+# Sistemas operativos
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+.vscode/
+*.swp

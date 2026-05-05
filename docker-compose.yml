@@ -1,0 +1,389 @@
+# ── Logging con rotación (aplica a todos los servicios via anchor YAML) ────
+x-logging: &default-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+# ── Hardening base compartido ──────────────────────────────────────────────
+x-worker-security: &worker-security
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp
+
+# ── Redes ───────────────────────────────────────────────────────────────────
+networks:
+  netwatch-net:
+    driver: bridge
+
+# ── Volúmenes persistentes ──────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  valkey_data:
+  grafana_data:
+  loki_data:
+
+# ── Servicios ───────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL + TimescaleDB ──────────────────────────────────────────────
+  postgres:
+    <<: *default-logging
+    image: timescale/timescaledb:latest-pg15
+    container_name: netwatch-postgres
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-netwatch}
+      POSTGRES_USER:     ${POSTGRES_USER:-netwatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U ${POSTGRES_USER:-netwatch} -d ${POSTGRES_DB:-netwatch} -c 'SELECT 1 FROM users LIMIT 1' > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── RabbitMQ ──────────────────────────────────────────────────────────────
+  rabbitmq:
+    <<: *default-logging
+    image: rabbitmq:3.12-management-alpine
+    container_name: netwatch-rabbitmq
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RABBITMQ_DEFAULT_USER:  ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_DEFAULT_PASS:  ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: netwatch
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── Valkey (reemplaza Redis, protocolo 100% compatible) ───────────────────
+  valkey:
+    <<: *default-logging
+    image: valkey/valkey:7.2-alpine
+    container_name: netwatch-valkey
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    command: valkey-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── API Gateway ───────────────────────────────────────────────────────────
+  api-gateway:
+    <<: *default-logging
+    image: ${DOCKERHUB_USERNAME}/netwatch-api-gateway:latest
+    container_name: netwatch-api-gateway
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST:              postgres
+      DB_PORT:              5432
+      DB_NAME:              ${POSTGRES_DB:-netwatch}
+      DB_USER:              ${POSTGRES_USER:-netwatch}
+      DB_PASS:              ${POSTGRES_PASSWORD}
+      RABBITMQ_HOST:        rabbitmq
+      RABBITMQ_USER:        ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS:        ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST:       netwatch
+      JWT_SECRET:           ${JWT_SECRET}
+      JWT_REFRESH_SECRET:   ${JWT_REFRESH_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
+
+  # ── Worker Captura ─────────────────────────────────────────────────────────
+  worker-capture:
+    <<: *default-logging
+    image: ${DOCKERHUB_USERNAME}/netwatch-worker-capture:latest
+    container_name: netwatch-worker-capture
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - /sys/class/net:/host/sys/class/net:ro
+    environment:
+      RABBITMQ_HOST:          rabbitmq
+      RABBITMQ_USER:          ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS:          ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST:         netwatch
+      DB_HOST:                postgres
+      DB_PORT:                5432
+      DB_NAME:                ${POSTGRES_DB:-netwatch}
+      DB_USER:                ${POSTGRES_USER:-netwatch}
+      DB_PASS:                ${POSTGRES_PASSWORD}
+      CAPTURE_INTERFACE:      ${CAPTURE_INTERFACE:-eth0}
+      CAPTURE_ENABLED:        ${CAPTURE_ENABLED:-true}
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    restart: unless-stopped
+
+  # ── Worker Análisis ────────────────────────────────────────────────────────
+  worker-analysis:
+    <<: [*default-logging, *worker-security]
+    image: ${DOCKERHUB_USERNAME}/netwatch-worker-analysis:latest
+    container_name: netwatch-worker-analysis
+    networks: [netwatch-net]
+    environment:
+      DB_HOST:       postgres
+      DB_PORT:       5432
+      DB_NAME:       ${POSTGRES_DB:-netwatch}
+      DB_USER:       ${POSTGRES_USER:-netwatch}
+      DB_PASS:       ${POSTGRES_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: netwatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
+
+  # ── Worker Alertas ─────────────────────────────────────────────────────────
+  worker-alerts:
+    <<: [*default-logging, *worker-security]
+    image: ${DOCKERHUB_USERNAME}/netwatch-worker-alerts:latest
+    container_name: netwatch-worker-alerts
+    networks: [netwatch-net]
+    environment:
+      DB_HOST:              postgres
+      DB_PORT:              5432
+      DB_NAME:              ${POSTGRES_DB:-netwatch}
+      DB_USER:              ${POSTGRES_USER:-netwatch}
+      DB_PASS:              ${POSTGRES_PASSWORD}
+      RABBITMQ_HOST:        rabbitmq
+      RABBITMQ_USER:        ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS:        ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST:       netwatch
+      SMTP_HOST:            ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT:            ${SMTP_PORT:-587}
+      SMTP_USER:            ${SMTP_USER:-}
+      SMTP_PASSWORD:        ${SMTP_PASSWORD:-}
+      ALERT_MIN_SEVERITY:   ${ALERT_MIN_SEVERITY:-HIGH}
+      ALERT_EMAIL_ENABLED:  ${ALERT_EMAIL_ENABLED:-false}
+      ALERT_EMAIL_TO:       ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_ENABLED: ${ALERT_WEBHOOK_ENABLED:-false}
+      ALERT_WEBHOOK_URL:    ${ALERT_WEBHOOK_URL:-}
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
+
+  # ── Worker OSINT ───────────────────────────────────────────────────────────
+  worker-osint:
+    <<: [*default-logging, *worker-security]
+    image: ${DOCKERHUB_USERNAME}/netwatch-worker-osint:latest
+    container_name: netwatch-worker-osint
+    networks: [netwatch-net]
+    environment:
+      DB_HOST:       postgres
+      DB_PORT:       5432
+      DB_NAME:       ${POSTGRES_DB:-netwatch}
+      DB_USER:       ${POSTGRES_USER:-netwatch}
+      DB_PASS:       ${POSTGRES_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: netwatch
+      VALKEY_HOST:   valkey
+      VALKEY_PORT:   6379
+      VALKEY_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+
+  # ── Worker Scanner ─────────────────────────────────────────────────────────
+  worker-scanner:
+    <<: *default-logging
+    image: ${DOCKERHUB_USERNAME}/netwatch-worker-scanner:latest
+    container_name: netwatch-worker-scanner
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      RABBITMQ_HOST:   rabbitmq
+      RABBITMQ_USER:   ${RABBITMQ_USER:-netwatch}
+      RABBITMQ_PASS:   ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST:  netwatch
+      SCANNER_DRY_RUN: ${SCANNER_DRY_RUN:-false}
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    restart: unless-stopped
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    <<: *default-logging
+    image: ${DOCKERHUB_USERNAME}/netwatch-frontend:latest
+    container_name: netwatch-frontend
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "3000:80"
+    depends_on:
+      api-gateway:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://0.0.0.0:80/ > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    <<: *default-logging
+    image: prom/prometheus:latest
+    container_name: netwatch-prometheus
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.listen-address=0.0.0.0:9090"
+    restart: unless-stopped
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    <<: *default-logging
+    image: grafana/grafana-oss:latest
+    container_name: netwatch-grafana
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD:      ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP:          "false"
+      GF_SERVER_ROOT_URL:              "http://localhost:3001"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR:   "true"
+      GF_SNAPSHOTS_EXTERNAL_ENABLED:  "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ── Loki ───────────────────────────────────────────────────────────────────
+  loki:
+    <<: *default-logging
+    image: grafana/loki:latest
+    container_name: netwatch-loki
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  # ── Promtail ──────────────────────────────────────────────────────────────
+  promtail:
+    <<: *default-logging
+    image: grafana/promtail:latest
+    container_name: netwatch-promtail
+    networks: [netwatch-net]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitoring/loki/promtail-config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped

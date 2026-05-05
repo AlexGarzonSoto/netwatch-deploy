@@ -1,0 +1,117 @@
+groups:
+
+  # ── Disponibilidad de servicios ──────────────────────────────────────────
+  - name: netwatch.availability
+    rules:
+
+      - alert: ServicioNetWatchCaido
+        expr: up{job=~"netwatch-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Servicio NetWatch caído: {{ $labels.job }}"
+          description: >
+            El servicio {{ $labels.job }} ({{ $labels.instance }}) lleva
+            más de 1 minuto sin responder al scrape de Prometheus.
+
+      - alert: RabbitMQCaido
+        expr: up{job="rabbitmq"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RabbitMQ no responde"
+          description: "El broker de mensajes lleva más de 1 minuto caído."
+
+  # ── Recursos del sistema ─────────────────────────────────────────────────
+  - name: netwatch.resources
+    rules:
+
+      - alert: MemoriaJVMAlta
+        expr: >
+          jvm_memory_used_bytes{area="heap"}
+          / jvm_memory_max_bytes{area="heap"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Heap JVM al {{ $value | humanizePercentage }} en {{ $labels.job }}"
+          description: >
+            El heap de {{ $labels.job }} supera el 85% durante 5 minutos.
+            Considerar aumentar el límite de memoria o revisar fugas.
+
+      - alert: MemoriaJVMCritica
+        expr: >
+          jvm_memory_used_bytes{area="heap"}
+          / jvm_memory_max_bytes{area="heap"} > 0.95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Heap JVM crítico en {{ $labels.job }}"
+          description: >
+            El heap de {{ $labels.job }} supera el 95%.
+            Riesgo inminente de OutOfMemoryError.
+
+  # ── Latencia y errores HTTP ──────────────────────────────────────────────
+  - name: netwatch.http
+    rules:
+
+      - alert: TasaErroresHTTPAlta
+        expr: >
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          by (job)
+          /
+          sum(rate(http_server_requests_seconds_count[5m]))
+          by (job) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tasa de errores 5xx > 5% en {{ $labels.job }}"
+          description: >
+            Más del 5% de las peticiones a {{ $labels.job }} retornan 5xx
+            durante 3 minutos consecutivos.
+
+      - alert: LatenciaP99Alta
+        expr: >
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le, job)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 de latencia > 2s en {{ $labels.job }}"
+          description: >
+            El percentil 99 de latencia en {{ $labels.job }} supera los
+            2 segundos durante 5 minutos.
+
+  # ── Cola RabbitMQ ────────────────────────────────────────────────────────
+  - name: netwatch.rabbitmq
+    rules:
+
+      - alert: ColaMensajesCreciendo
+        expr: >
+          rabbitmq_queue_messages{queue=~"netwatch\\..*"} > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cola {{ $labels.queue }} con > 1000 mensajes pendientes"
+          description: >
+            La cola {{ $labels.queue }} acumula mensajes sin procesar.
+            Verificar que el worker consumidor esté activo.
+
+      - alert: ColaMensajesCritica
+        expr: >
+          rabbitmq_queue_messages{queue=~"netwatch\\..*"} > 5000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cola {{ $labels.queue }} saturada (> 5000 mensajes)"
+          description: >
+            La cola {{ $labels.queue }} tiene más de 5000 mensajes.
+            El sistema puede estar perdiendo eventos de seguridad.

@@ -1,0 +1,102 @@
+{
+  "id": null,
+  "uid": "netwatch-main",
+  "title": "NetWatch — Monitoreo de Amenazas",
+  "tags": ["netwatch", "security"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Eventos totales",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{
+        "expr": "sum(increase(analysis_threats_detected_total[1h]))",
+        "legendFormat": "Amenazas / hora"
+      }],
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Paquetes capturados / min",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{
+        "expr": "rate(capture_packets_processed_total[1m]) * 60",
+        "legendFormat": "pkt/min"
+      }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Alertas enviadas",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{
+        "expr": "sum(increase(alerts_dispatched_total[1h]))",
+        "legendFormat": "Alertas / hora"
+      }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Enriquecimientos OSINT",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{
+        "expr": "sum(increase(osint_requests_resolved_total[1h]))",
+        "legendFormat": "Resueltos / hora"
+      }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Amenazas detectadas por tipo",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{
+        "expr": "sum by(type) (rate(analysis_threats_detected_total[5m]))",
+        "legendFormat": "{{type}}"
+      }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Paquetes capturados vs Amenazas",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "rate(capture_packets_processed_total[1m])",
+          "legendFormat": "Paquetes / s"
+        },
+        {
+          "expr": "rate(analysis_threats_detected_total[1m])",
+          "legendFormat": "Amenazas / s"
+        }
+      ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "JVM — Memoria Heap (MB)",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area='heap', application='netwatch-api-gateway'} / 1e6",
+          "legendFormat": "Gateway"
+        },
+        {
+          "expr": "jvm_memory_used_bytes{area='heap', application='netwatch-worker-analysis'} / 1e6",
+          "legendFormat": "Analysis"
+        }
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "RabbitMQ — Mensajes en cola",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "targets": [{
+        "expr": "rabbitmq_queue_messages",
+        "legendFormat": "{{queue}}"
+      }]
+    },
+    {
+      "id": 9, "type": "table", "title": "Errores recientes por servicio",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 18 },
+      "targets": [{
+        "expr": "sum by(application) (increase(analysis_packets_errors_total[5m]) + increase(capture_packets_errors_total[5m]) + increase(alerts_errors_total[5m]) + increase(osint_requests_errors_total[5m]))",
+        "legendFormat": "{{application}}"
+      }],
+      "options": { "showHeader": true }
+    }
+  ]
+}
