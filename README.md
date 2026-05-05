@@ -91,7 +91,7 @@ Editar `.env` y completar los valores obligatorios:
 
 ```bash
 # Tu usuario de Docker Hub
-DOCKERHUB_USERNAME=alexgarzonsoto
+DOCKERHUB_USERNAME=usuario Docker Hub
 
 # Claves JWT — generar con openssl (OBLIGATORIO cambiar):
 JWT_SECRET=$(openssl rand -hex 64)
