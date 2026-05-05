@@ -455,11 +455,8 @@ Todas las herramientas tienen licencia **OSI aprobada**. Redis y Terraform fuero
 | [Manual de Despliegue](docs/deployment-manual.md) | Docker Compose, producción con TLS, IaC, Ansible, backup |
 | [Manual de Seguridad](docs/security-manual.md) | STRIDE, pipeline CI/CD, gestión de CVEs, respuesta a incidentes |
 | [Manual de Usuario](docs/user-manual.md) | Dashboard, eventos, alertas, scanner, API REST |
-| [Diagrama de Componentes](docs/architecture/component-diagram.puml) | Visión general de microservicios |
-| [Diagrama de Despliegue](docs/architecture/deployment-diagram.puml) | Contenedores, redes y volúmenes |
-| [Diagrama de Secuencia JWT](docs/architecture/sequence-auth.puml) | Flujo completo de autenticación |
-| [Casos de Uso](docs/architecture/use-cases.puml) | Actores: Admin, Analista, Viewer |
-| [Modelo de Amenazas](docs/architecture/threat-model.json) | OWASP Threat Dragon — DFD Nivel 0 y 1 |
+| [Diagramas de Arquitectura](https://github.com/AlexGarzonSoto/MonitoreoRedInfra/blob/main/docs/architecture/README.md) | Componentes, despliegue, secuencia JWT y casos de uso (Mermaid, renderiza en GitHub) |
+| [Modelo de Amenazas STRIDE](https://github.com/AlexGarzonSoto/MonitoreoRedInfra/blob/main/docs/architecture/threat-model.json) | OWASP Threat Dragon — DFD Nivel 0 y 1 — abrir en threatdragon.com |
 
 ---
 
