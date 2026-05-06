@@ -39,7 +39,7 @@ NetWatch es un sistema de detección de amenazas en red en tiempo real, construi
 
 ---
 
-## 2. Inicio rápido con Make
+## 2. Inicio rápido con Make (IOS, Linux, wsl)
 
 La forma más sencilla de levantar NetWatch es usando el `Makefile` incluido:
 
@@ -104,8 +104,10 @@ REDIS_PASSWORD=tu_password_seguro
 GRAFANA_PASSWORD=tu_password_seguro
 ```
 
+>  ⚠️ **Importante:** Para clientes windows OpenSSl no esta disponible por favor descargar version 3.5 LTS https://github.com/openssl/openssl/releases/download/openssl-3.5.6/openssl-3.5.6.tar.gz.
+
 > ⚠️ **Importante:** Nunca usar los valores de ejemplo en producción. Generar claves únicas con `openssl rand -hex 64`.
-> > ⚠️ **Importante:** Para clientes windows OpenSSl no esta disponible por favor descargar version 3.5 LTS https://github.com/openssl/openssl/releases/download/openssl-3.5.6/openssl-3.5.6.tar.gz.
+
 
 ### Paso 3 — Levantar los servicios
 
