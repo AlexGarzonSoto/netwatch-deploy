@@ -105,6 +105,7 @@ GRAFANA_PASSWORD=tu_password_seguro
 ```
 
 > ⚠️ **Importante:** Nunca usar los valores de ejemplo en producción. Generar claves únicas con `openssl rand -hex 64`.
+> > ⚠️ **Importante:** Para clientes windows OpenSSl no esta disponible por favor descargar version 3.5 LTS https://github.com/openssl/openssl/releases/download/openssl-3.5.6/openssl-3.5.6.tar.gz.
 
 ### Paso 3 — Levantar los servicios
 
